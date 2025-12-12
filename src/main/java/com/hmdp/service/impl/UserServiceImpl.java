@@ -13,14 +13,19 @@ import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
 import com.hmdp.constants.RedisConstants;
 import com.hmdp.utils.RegexUtils;
+import com.hmdp.utils.UserHolder;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -86,5 +91,46 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         stringRedisTemplate.expire(tokenKey, RedisConstants.LOGIN_USER_TTL, TimeUnit.MINUTES);
 //        session.setAttribute("user", userDTO);
         return Result.ok(token);
+    }
+
+    @Override
+    public Result sign() {
+        Long id = UserHolder.getUser().getId();
+        String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM:"));
+        String key = RedisConstants.USER_SIGN_KEY + now + id;
+        int day = LocalDateTime.now().getDayOfMonth();
+        stringRedisTemplate.opsForValue().setBit(key, day - 1, true);
+        return Result.ok();
+    }
+
+    @Override
+    public Result signCount() {
+        Long id = UserHolder.getUser().getId();
+        String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM:"));
+        String key = RedisConstants.USER_SIGN_KEY + now + id;
+        int day = LocalDateTime.now().getDayOfMonth();
+        List<Long> bitField = stringRedisTemplate.opsForValue().bitField(
+                key,
+                BitFieldSubCommands.create()
+                        .get(BitFieldSubCommands.BitFieldType.unsigned(day))
+                        .valueAt(0)
+        );
+        if (bitField == null || bitField.isEmpty()) {
+            return Result.ok(0);
+        }
+        Long l = bitField.get(0);
+        if (l == null || l == 0L) {
+            return Result.ok(0);
+        }
+        int count = 0;
+        while (true) {
+            if ((l & 1) == 0) {
+                break;
+            } else {
+                count++;
+                l = l >>> 1;
+            }
+        }
+        return Result.ok(count);
     }
 }
